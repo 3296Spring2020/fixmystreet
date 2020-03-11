@@ -10,6 +10,8 @@
     - Development improvements:
         - Refactor Script::Report into an object.
         - Move summary failures to a separate script.
+    - Open311 improvements:
+        - match response templates on external status code over state
     - UK:
         - Added junction lookup, so you can search for things like "M60, Junction 2"
 

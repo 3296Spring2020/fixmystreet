@@ -262,17 +262,22 @@ sub comment_text_for_request {
     my $ext_code_changed = $ext_code ne $old_ext_code;
     my $template;
     if ($state_changed || $ext_code_changed) {
+        my $order;
         my $state_params = {
             'me.state' => $state
         };
         if ($ext_code) {
             $state_params->{'me.external_status_code'} = $ext_code;
+            # make sure that empty string comes last. Can't use DESC as that orders
+            # empty string before codes starting with 0 and explicit ASC will order
+            # empty string before codes starting with characters
+            $order = { order_by => \"me.external_status_code DESC NULLS LAST" };
         };
 
         if (my $t = $problem->response_templates->search({
             auto_response => 1,
             -or => $state_params,
-        })->first) {
+        }, $order )->first) {
             $template = $t->text;
         }
     }
