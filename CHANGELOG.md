@@ -10,6 +10,7 @@
     - Development improvements:
         - Refactor Script::Report into an object.
         - Move summary failures to a separate script.
+        - Add a daemon option for sending reports.
     - UK:
         - Added junction lookup, so you can search for things like "M60, Junction 2"
 

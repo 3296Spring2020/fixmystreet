@@ -49,7 +49,7 @@ sub process {
 
     FixMyStreet::DB->schema->cobrand($self->cobrand);
 
-    if ($self->debug_mode) {
+    if ($self->debug_mode && $self->manager) {
         $self->manager->debug_unsent_count++;
         print "\n";
         my $row = $self->report;
@@ -233,16 +233,18 @@ sub _send {
         my $res = $sender->send( $self->report, $self->h );
         $result *= $res;
         $self->report->add_send_method($sender) if !$res;
-        if ( $sender->unconfirmed_data) {
-            foreach my $e (keys %{ $sender->unconfirmed_data } ) {
-                foreach my $c (keys %{ $sender->unconfirmed_data->{$e} }) {
-                    $self->manager->unconfirmed_data->{$e}{$c}{count} += $sender->unconfirmed_data->{$e}{$c}{count};
-                    $self->manager->unconfirmed_data->{$e}{$c}{note} = $sender->unconfirmed_data->{$e}{$c}{note};
+        if ( $self->manager ) {
+            if ($sender->unconfirmed_data) {
+                foreach my $e (keys %{ $sender->unconfirmed_data } ) {
+                    foreach my $c (keys %{ $sender->unconfirmed_data->{$e} }) {
+                        $self->manager->unconfirmed_data->{$e}{$c}{count} += $sender->unconfirmed_data->{$e}{$c}{count};
+                        $self->manager->unconfirmed_data->{$e}{$c}{note} = $sender->unconfirmed_data->{$e}{$c}{note};
+                    }
                 }
             }
+            $self->manager->test_data->{test_req_used} = $sender->open311_test_req_used
+                if FixMyStreet->test_mode && $sender->can('open311_test_req_used');
         }
-        $self->manager->test_data->{test_req_used} = $sender->open311_test_req_used
-            if FixMyStreet->test_mode && $sender->can('open311_test_req_used');
     }
 
     return $result;
@@ -299,6 +301,7 @@ sub _send_report_sent_email {
 
 sub debug_print {
     my $self = shift;
+    return unless $self->manager;
     $self->manager->debug_print(@_);
 }
 

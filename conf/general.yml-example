@@ -261,3 +261,7 @@ LOGIN_REQUIRED: 0
 # If you want to stop new users from registering, set this to 1.
 # NB: This also disables all Facebook/Twitter logins.
 SIGNUPS_DISABLED: 0
+
+# If you use the daemon for sending reports, rather than the cron script,
+# this is how many children it will have.
+QUEUE_DAEMON_PROCESSES: 4

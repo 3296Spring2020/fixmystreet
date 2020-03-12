@@ -1,0 +1,91 @@
+#!/usr/bin/env perl
+#
+# send-daemon
+# FixMyStreet daemon for sending reports and updates.
+
+use strict;
+use warnings;
+use v5.14;
+
+BEGIN {
+    use File::Basename qw(dirname);
+    use File::Spec;
+    my $d = dirname(File::Spec->rel2abs($0));
+    require "$d/../setenv.pl";
+}
+
+use Parallel::ForkManager;
+use CronFns;
+use FixMyStreet;
+use FixMyStreet::DB;
+use FixMyStreet::Script::Reports;
+use FixMyStreet::Queue::Item::Report;
+
+my ($verbose, $nomail, $debug_mode) = CronFns::options();
+
+my $base_url = FixMyStreet->config('BASE_URL');
+my $site = CronFns::site($base_url);
+
+my $states = [ FixMyStreet::DB::Result::Problem::open_states() ];
+$states = [ 'submitted', 'confirmed', 'in progress', 'feedback pending', 'external', 'wish' ] if $site eq 'zurich';
+
+my $db = FixMyStreet::DB->schema->storage;
+
+my $procs = FixMyStreet->config('QUEUE_DAEMON_PROCESSES') || 4;
+
+my %children;
+
+my $pm = Parallel::ForkManager->new($procs);
+
+$pm->run_on_start(sub {
+    my $pid = shift;
+    $children{$pid} = time();
+});
+$pm->run_on_finish(sub {
+    my $pid = shift;
+    if ($children{$pid} > time() - 10) {
+        # It didn't live very long, let's wait a bit
+        sleep(5);
+    }
+    delete $children{$pid};
+});
+
+# The parent loop
+while (1) {
+    while (keys %children < $procs) {
+        $pm->start and next;
+        while (1) {
+            $0 = "fmsd (running queue)";
+            $db->txn_do(\&look_for_item);
+            $0 = "fmsd";
+            sleep(5 + rand(10));
+        }
+        $pm->finish;
+    }
+
+    if (!keys %children) { # Very high load, something wrong
+        sleep(10);
+        next;
+    }
+
+    $pm->wait_for_available_procs;
+}
+
+sub look_for_item {
+    my $unsent = FixMyStreet::DB->resultset('Problem')->search( {
+        state => $states,
+        whensent => undef,
+        bodies_str => { '!=', undef },
+    }, {
+        for => \'UPDATE SKIP LOCKED',
+        rows => 1,
+    } )->single or return;
+
+    say "Trying to send " . $unsent->id if $debug_mode;
+    my $item = FixMyStreet::Queue::Item::Report->new(
+        report => $unsent,
+        nomail => $nomail,
+        debug_mode => $debug_mode,
+    );
+    $item->process;
+}
