@@ -20,6 +20,7 @@ use FixMyStreet;
 use FixMyStreet::DB;
 use FixMyStreet::Script::Reports;
 use FixMyStreet::Queue::Item::Report;
+use Open311::PostServiceRequestUpdates;
 
 my ($verbose, $nomail, $debug_mode) = CronFns::options();
 
@@ -56,7 +57,8 @@ while (1) {
         $pm->start and next;
         while (1) {
             $0 = "fmsd (running queue)";
-            $db->txn_do(\&look_for_item);
+            $db->txn_do(\&look_for_report);
+            $db->txn_do(\&look_for_update);
             $0 = "fmsd";
             sleep(5 + rand(10));
         }
@@ -71,7 +73,7 @@ while (1) {
     $pm->wait_for_available_procs;
 }
 
-sub look_for_item {
+sub look_for_report {
     my $unsent = FixMyStreet::DB->resultset('Problem')->search( {
         state => $states,
         whensent => undef,
@@ -88,4 +90,26 @@ sub look_for_item {
         debug_mode => $debug_mode,
     );
     $item->process;
+}
+
+sub look_for_update {
+    my $body = FixMyStreet::DB->resultset('Body')->search( {
+        send_method => 'Open311',
+        send_comments => 1,
+    }, {
+        for => \'UPDATE SKIP LOCKED',
+        rows => 1,
+    } )->single or return;
+
+    my $cobrand = $body->get_cobrand_handler;
+    next if $cobrand && $cobrand->call_hook('open311_post_update_skip');
+
+    say "Sending updates for " . $body->name if $debug_mode;
+
+    my $updates = Open311::PostServiceRequestUpdates->new(
+        verbose => $verbose,
+    );
+    my $o = Open311->new($updates->open311_params($body));
+    $updates->current_open311($o);
+    $updates->process_body($body);
 }
