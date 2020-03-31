@@ -106,4 +106,38 @@ fixmystreet.assets.add(defaults, {
     asset_item_message: ''
 });
 
+var streetlight_stylemap = new OpenLayers.StyleMap({
+  'default': fixmystreet.assets.style_default,
+  'select': fixmystreet.assets.construct_named_select_style("${UNITNO}")
+});
+
+fixmystreet.assets.add(defaults, {
+    http_options: {
+        params: {
+            TYPENAME: "StreetLights"
+        }
+    },
+    stylemap: streetlight_stylemap,
+    feature_code: 'UNITNO',
+    asset_type: 'spot',
+    asset_id_field: 'UNITID',
+    attributes: {
+        asset_details: function() {
+            var a = this.attributes;
+            return "street: " + a.FULLSTREET + "\n" +
+                "locality: " + a.LOCALITY + "\n" +
+                "unitno: " + a.UNITNO + "\n" +
+                "unitid: " + a.UNITID;
+        }
+    },
+    asset_group: 'Street lighting',
+    asset_item: 'light',
+    asset_item_message: 'You can pick a <b class="asset-spot">street light</b> from the map &raquo;',
+    select_action: true,
+    actions: {
+        asset_found: fixmystreet.assets.named_select_action_found,
+        asset_not_found: fixmystreet.assets.named_select_action_not_found
+    }
+});
+
 })();
