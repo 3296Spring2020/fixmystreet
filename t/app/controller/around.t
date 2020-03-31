@@ -232,7 +232,11 @@ subtest 'check category, status and extra filtering works on /around' => sub {
 
     # Create one open and one fixed report in each category
     foreach my $category ( @$categories ) {
-        $mech->create_contact_ok( category => $category, body_id => $body->id, email => "$category\@example.org" );
+        my $contact = $mech->create_contact_ok( category => $category, body_id => $body->id, email => "$category\@example.org" );
+        if ($category ne 'Pothole') {
+            $contact->set_extra_metadata(group => ['Environment']);
+            $contact->update;
+        }
         foreach my $state ( 'confirmed', 'fixed - user', 'fixed - council' ) {
             my %report_params = (
                 %$params,
@@ -252,9 +256,14 @@ subtest 'check category, status and extra filtering works on /around' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => 'fixmystreet',
         MAPIT_URL => 'http://mapit.uk/',
+        COBRAND_FEATURES => { category_groups => { fixmystreet => 1 } },
     }, sub {
         $mech->get_ok( '/around?filter_category=Pothole&bbox=' . $bbox );
         $mech->content_contains('<option value="Pothole" selected>');
+        $mech->content_contains('<optgroup label="Environment">');
+
+        $mech->get_ok( '/around?filter_group=Environment&bbox=' . $bbox );
+        $mech->content_contains('<option value="Flytipping" selected>');
     };
 
     $json = $mech->get_ok_json( '/around?ajax=1&filter_category=Pothole&bbox=' . $bbox );
@@ -389,6 +398,35 @@ subtest 'check nearby lookup' => sub {
     my $p = FixMyStreet::DB->resultset("Problem")->search({ external_body => "Pothole-confirmed" })->first;
     $mech->get_ok('/around/nearby?latitude=51.754926&longitude=-1.256179&filter_category=Pothole');
     $mech->content_contains('[51.754926,-1.256179,"yellow",' . $p->id . ',"Around page Test 1 for ' . $body->id . '","small",false]');
+};
+
+my $he = Test::MockModule->new('HighwaysEngland');
+$he->mock('_lookup_db', sub {
+    my ($road, $table, $thing, $thing_name) = @_;
+
+    if ($road eq 'M6' && $thing eq '11') {
+        return { latitude => 52.65866, longitude => -2.06447 };
+    } elsif ($road eq 'M5' && $thing eq '132.5') {
+        return { latitude => 51.5457, longitude => 2.57136 };
+    }
+});
+
+subtest 'junction lookup' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'fixmystreet',
+        MAPIT_URL => 'http://mapit.uk',
+        MAPIT_TYPES => ['EUR'],
+    }, sub {
+        $mech->log_out_ok;
+
+        $mech->get_ok('/');
+        $mech->submit_form_ok({ with_fields => { pc => 'M6, Junction 11' } });
+        $mech->content_contains('52.65866');
+
+        $mech->get_ok('/');
+        $mech->submit_form_ok({ with_fields => { pc => 'M5 132.5' } });
+        $mech->content_contains('51.5457');
+    };
 };
 
 done_testing();

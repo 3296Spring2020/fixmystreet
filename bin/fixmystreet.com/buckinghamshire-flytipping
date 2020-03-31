@@ -34,7 +34,7 @@ my $body = FixMyStreet::DB->resultset("Body")->for_areas(BUCKS_AREA_ID)->first;
 die "Could not find Bucks body" unless $body;
 
 my @districts = FixMyStreet::DB->resultset("Body")->for_areas(DISTRICT_IDS)->all;
-my @district_ids = map { $_->id } @districts;
+my @district_ids = map { $_->id } grep { $_->name ne 'TfL' } @districts;
 die "Did not find all districts" unless @district_ids == 4;
 
 find_problems(TIME_OPEN_ALERT, TIME_OPEN, 'Auto-closure', 1);
@@ -57,12 +57,22 @@ sub find_problems {
         $time_param = { '<', \$to };
     }
 
-    # Fetch all Flytipping problems sent only to districts, between $from and $to
-    my $q = FixMyStreet::DB->resultset("Problem")->search(
-        \[ "? @> regexp_split_to_array(bodies_str, ',')", [ {} => \@district_ids ] ]
-    )->search({
+    # Fetch all Flytipping problems made off-road (i.e. those that previously
+    # would been sent only to districts) any any older ones which actually were
+    # sent to districts, between $from and $to
+    my $q = FixMyStreet::DB->resultset("Problem")->search([
+        # Reports sent to district, made before the unitary switchover
+        -and => [
+            \[ "? @> regexp_split_to_array(bodies_str, ',')", [ {} => \@district_ids ] ],
+            category => 'Flytipping'
+        ],
+        # Reports sent to Bucks Council after unitary switchover
+        {
+            bodies_str => $body->id,
+            category => 'Flytipping (off-road)'
+        }
+    ])->search({
         state => [ FixMyStreet::DB::Result::Problem->open_states() ],
-        category => 'Flytipping',
         confirmed => $time_param,
     });
 

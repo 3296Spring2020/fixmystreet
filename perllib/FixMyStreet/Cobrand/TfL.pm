@@ -4,23 +4,52 @@ use parent 'FixMyStreet::Cobrand::Whitelabel';
 use strict;
 use warnings;
 
+use Moo;
+with 'FixMyStreet::Roles::BoroughEmails';
+
 use POSIX qw(strcoll);
 
 use FixMyStreet::MapIt;
 use mySociety::ArrayUtils;
 use Utils;
 
-sub council_area_id { return [
+sub london_boroughs { (
     2511, 2489, 2494, 2488, 2482, 2505, 2512, 2481, 2484, 2495,
     2493, 2508, 2502, 2509, 2487, 2485, 2486, 2483, 2507, 2503,
     2480, 2490, 2492, 2500, 2510, 2497, 2499, 2491, 2498, 2506,
-    2496, 2501, 2504
-]; }
+    2496, 2501, 2504,
+) }
+
+# Surrounding areas for bus stops which can be outside London
+sub surrounding_london { (
+    # Clockwise from top left: South Bucks, Three Rivers, Watford, Hertsmere,
+    # Welwyn Hatfield, Broxbourne, Epping Forest, Brentwood, Thurrock,
+    # Dartford, Sevenoaks, Tandridge, Reigate and Banstead, Epsom and Ewell,
+    # Mole Valley, Elmbridge, Spelthorne, Slough
+    2256, 2338, 2346, 2339, 2344, 2340, 2311, 2309, 2615,
+    2358, 2350, 2448, 2453, 2457, 2454, 2455, 2456, 2606,
+) }
+
+sub council_area_id { [ $_[0]->london_boroughs, $_[0]->surrounding_london ] }
+
 sub council_area { return 'TfL'; }
 sub council_name { return 'TfL'; }
 sub council_url { return 'tfl'; }
-sub area_types  { [ 'LBO' ] }
+sub area_types  { [ 'LBO', 'UTA', 'DIS' ] }
 sub is_council { 0 }
+
+sub borough_for_report {
+    my ($self, $problem) = @_;
+
+    # Get relevant area ID from report
+    my %areas = map { $_ => 1 } split ',', $problem->areas;
+    my ($council_match) = grep { $areas{$_} } @{ $self->council_area_id };
+    return unless $council_match;
+
+    # Look up area names if not already fetched
+    my $areas = $self->{c}->stash->{children} ||= $self->fetch_area_children;
+    return $areas->{$council_match}{name};
+}
 
 sub abuse_reports_only { 1 }
 sub send_questionnaires { 0 }
@@ -172,6 +201,12 @@ sub admin_allow_user {
     return $user->from_body->name eq 'TfL';
 }
 
+sub around_nearby_filter {
+    my ($self, $params) = @_;
+    # Include all reports in duplicate spotting
+    delete $params->{states};
+}
+
 sub state_groups_inspect {
     my $rs = FixMyStreet::DB->resultset("State");
     my @open = grep { $_ !~ /^(planned|action scheduled|for triage)$/ } FixMyStreet::DB::Result::Problem->open_states;
@@ -186,7 +221,9 @@ sub state_groups_inspect {
 sub fetch_area_children {
     my $self = shift;
 
-    my $areas = FixMyStreet::MapIt::call('areas', $self->area_types);
+    # This is for user admin display, in testing can only be London (for MapIt mock)
+    my $ids = FixMyStreet->test_mode ? 'LBO' : $self->council_area_id;
+    my $areas = FixMyStreet::MapIt::call('areas', $ids);
     foreach (keys %$areas) {
         $areas->{$_}->{name} =~ s/\s*(Borough|City|District|County) Council$//;
     }
@@ -210,7 +247,7 @@ sub dashboard_export_problems_add_columns {
 
     my %groups;
     if ($c->stash->{body}) {
-        %groups = FixMyStreet::DB->resultset('Contact')->active->search({
+        %groups = FixMyStreet::DB->resultset('Contact')->search({
             body_id => $c->stash->{body}->id,
         })->group_lookup;
     }
@@ -307,12 +344,18 @@ sub must_have_2fa {
 sub update_email_shortlisted_user {
     my ($self, $update) = @_;
     my $c = $self->{c};
+    my $cobrand = FixMyStreet::Cobrand::TfL->new; # $self may be FMS
     my $shortlisted_by = $update->problem->shortlisted_user;
     if ($shortlisted_by && $shortlisted_by->from_body && $shortlisted_by->from_body->name eq 'TfL' && $shortlisted_by->id ne $update->user_id) {
         $c->send_email('alert-update.txt', {
+            additional_template_paths => [
+                FixMyStreet->path_to( 'templates', 'email', 'tfl' ),
+                FixMyStreet->path_to( 'templates', 'email', 'fixmystreet.com'),
+            ],
             to => [ [ $shortlisted_by->email, $shortlisted_by->name ] ],
             report => $update->problem,
-            problem_url => $c->cobrand->base_url_for_report($update->problem) . $update->problem->url,
+            cobrand => $cobrand,
+            problem_url => $cobrand->base_url . $update->problem->url,
             data => [ {
                 item_photo => $update->photo,
                 item_text => $update->text,
@@ -351,63 +394,6 @@ sub report_new_munge_before_insert {
     $report->set_extra_fields(@$extra);
 }
 
-=head2 munge_sendreport_params
-
-TfL want reports made in certain categories sent to different email addresses
-depending on what London Borough they were made in. To achieve this we have
-some config in COBRAND_FEATURES that specifies what address to direct reports
-to based on the MapIt area IDs it's in.
-
-Contacts that use this technique have a short code in their email field,
-which is looked up in the `borough_email_addresses` hash.
-
-For example, if you wanted Pothole reports in Bromley and Barnet to be sent to
-one email address, and Pothole reports in Hounslow to be sent to another,
-create a contact with category = "Potholes" and email = "BOROUGHPOTHOLES" and
-use the following config in general.yml:
-
-COBRAND_FEATURES:
-  borough_email_addresses:
-    tfl:
-      BOROUGHPOTHOLES:
-        - email: bromleybarnetpotholes@example.org
-          areas:
-            - 2482 # Bromley
-            - 2489 # Barnet
-        - email: hounslowpotholes@example.org
-          areas:
-            - 2483 # Hounslow
-
-=cut
-
-sub munge_sendreport_params {
-    my ($self, $row, $h, $params) = @_;
-
-    my $addresses = $self->feature('borough_email_addresses');
-    return unless $addresses;
-
-    my @report_areas = grep { $_ } split ',', $row->areas;
-
-    my $to = $params->{To};
-    my @munged_to = ();
-    for my $recip ( @$to ) {
-        my ($email, $name) = @$recip;
-        if (my $teams = $addresses->{$email}) {
-            for my $team (@$teams) {
-                my %team_area_ids = map { $_ => 1 } @{ $team->{areas} };
-                if ( grep { $team_area_ids{$_} } @report_areas ) {
-                    $recip = [
-                        $team->{email},
-                        $name
-                    ];
-                }
-            }
-        }
-        push @munged_to, $recip;
-    }
-    $params->{To} = \@munged_to;
-}
-
 sub report_new_is_on_tlrn {
     my ( $self ) = @_;
 
@@ -428,29 +414,48 @@ sub report_new_is_on_tlrn {
     return scalar @$features ? 1 : 0;
 }
 
-sub munge_report_new_category_list { }
+sub munge_reports_area_list {
+    my ($self, $areas) = @_;
+    my %london_hash = map { $_ => 1 } $self->london_boroughs;
+    @$areas = grep { $london_hash{$_} } @$areas;
+}
+
+sub munge_report_new_contacts { }
+sub munge_report_new_bodies { }
+
+sub munge_surrounding_london {
+    my ($self, $bodies) = @_;
+    # Are we in a London borough?
+    my $all_areas = $self->{c}->stash->{all_areas};
+    my %london_hash = map { $_ => 1 } $self->london_boroughs;
+    if (!grep { $london_hash{$_} } keys %$all_areas) {
+        # Don't send any TfL categories
+        %$bodies = map { $_->id => $_ } grep { $_->name ne 'TfL' } values %$bodies;
+    }
+}
 
 sub munge_red_route_categories {
-    my ($self, $options, $contacts) = @_;
+    my ($self, $contacts) = @_;
     if ( $self->report_new_is_on_tlrn ) {
         # We're on a red route - only send TfL categories (except the disabled
-        # one that directs the user to borough for street cleaning) and borough
-        # street cleaning categories.
+        # ones that direct the user to borough for street cleaning & flytipping)
+        # and borough street cleaning/flytipping categories.
         my %cleaning_cats = map { $_ => 1 } @{ $self->_cleaning_categories };
+        my %council_cats = map { $_ => 1 } @{ $self->_tfl_council_categories };
         @$contacts = grep {
-            ( $_->body->name eq 'TfL' && $_->category ne $self->_tfl_council_category )
+            ( $_->body->name eq 'TfL' && !$council_cats{$_->category} )
             || $cleaning_cats{$_->category}
             || @{ mySociety::ArrayUtils::intersection( $self->_cleaning_groups, $_->groups ) }
         } @$contacts;
     } else {
         # We're not on a red route - send all categories except
-        # TfL red-route-only and the TfL street cleaning.
-        my %tlrn_cats = map { $_ => 1 } @{ $self->_tlrn_categories };
-        $tlrn_cats{$self->_tfl_council_category} = 1;
+        # TfL red-route-only and the TfL street cleaning & flytipping.
+        my %tlrn_cats = (
+            map { $_ => 1 } @{ $self->_tlrn_categories },
+            map { $_ => 1 } @{ $self->_tfl_council_categories },
+        );
         @$contacts = grep { !( $_->body->name eq 'TfL' && $tlrn_cats{$_->category } ) } @$contacts;
     }
-    my $seen = { map { $_->category => 1 } @$contacts };
-    @$options = grep { my $c = ($_->{category} || $_->category); $c =~ 'Pick a category' || $seen->{ $c } } @$options;
 }
 
 # Reports in these categories can only be made on a red route
@@ -462,7 +467,6 @@ sub _tlrn_categories { [
     "Debris in the carriageway",
     "Fallen Tree",
     "Flooding",
-    "Flytipping (TfL)",
     "Graffiti / Flyposting (non-offensive)",
     "Graffiti / Flyposting (offensive)",
     "Graffiti / Flyposting on street light (non-offensive)",
@@ -483,6 +487,7 @@ sub _tlrn_categories { [
     "Scaffolding blocking carriageway or footway",
     "Single Light out (street light)",
     "Standing water",
+    "Street Light - Equipment damaged, pole leaning",
     "Unstable hoardings",
     "Unstable scaffolding",
     "Worn out road markings",
@@ -491,17 +496,29 @@ sub _tlrn_categories { [
 sub _cleaning_categories { [
     'Street cleaning',
     'Street Cleaning',
+    'Street cleaning and litter',
     'Accumulated Litter',
     'Street Cleaning Enquiry',
     'Street Cleansing',
+    'Flytipping',
+    'Fly tipping',
+    'Fly Tipping',
+    'Fly-tipping',
+    'Fly-Tipping',
+    'Fly tipping - Enforcement Request',
 ] }
 
-sub _cleaning_groups { [ 'Street cleaning' ] }
+sub _cleaning_groups { [ 'Street cleaning', 'Fly-tipping' ] }
 
-sub _tfl_council_category { 'General Litter / Rubbish Collection' }
+sub _tfl_council_categories { [
+    'General Litter / Rubbish Collection',
+    'Flytipping (TfL)',
+] }
 
 sub _tfl_no_resend_categories { [
+    'Countdown - not working',
     'General Litter / Rubbish Collection',
+    'Flytipping (TfL)',
     'Other (TfL)',
     'Timings',
 ] }

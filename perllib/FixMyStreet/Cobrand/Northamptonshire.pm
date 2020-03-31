@@ -36,6 +36,8 @@ sub on_map_default_status { 'open' }
 
 sub report_sent_confirmation_email { 'id' }
 
+sub admin_user_domain { 'northamptonshire.gov.uk' }
+
 has body_obj => (
     is => 'lazy',
     default => sub {
@@ -73,6 +75,18 @@ sub problems_on_map_restriction {
     return $self->problems_restriction($rs);
 }
 
+sub problem_state_processed {
+    my ($self, $comment) = @_;
+
+    my $state = $comment->problem_state;
+
+    if ( $state eq 'investigating' and $comment->get_extra_metadata('external_status_code') eq 'further' ) {
+        $state = 'Under further investigation';
+    }
+
+    return $state;
+}
+
 sub privacy_policy_url {
     'https://www3.northamptonshire.gov.uk/councilservices/council-and-democracy/transparency/information-policies/privacy-notice/place/Pages/street-doctor.aspx'
 }
@@ -81,17 +95,18 @@ sub is_two_tier { 1 }
 
 sub get_geocoder { 'OSM' }
 
-sub map_type { 'OSM' }
+sub map_type { 'Northamptonshire' }
 
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
+    $params->{multi_photos} = 1;
+}
 
-    # remove the emergency category which is informational only
-    @$extra = grep { $_->{name} ne 'emergency' } @$extra;
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
 
-    push @$extra,
+    return ([
         { name => 'report_url',
           value => $h->{url} },
         { name => 'title',
@@ -99,11 +114,10 @@ sub open311_config {
         { name => 'description',
           value => $row->detail },
         { name => 'category',
-          value => $row->category };
-
-    $row->set_extra_fields(@$extra);
-
-    $params->{multi_photos} = 1;
+          value => $row->category },
+    ], [
+        'emergency'
+    ]);
 }
 
 sub open311_get_update_munging {

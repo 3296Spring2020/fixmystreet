@@ -16,7 +16,6 @@ var defaults = {
     },
     asset_type: 'spot',
     max_resolution: 2.388657133579254,
-    min_resolution: 0.5971642833948135,
     geometryName: 'msGeometry',
     srsName: "EPSG:3857",
     strategy_class: OpenLayers.Strategy.FixMyStreet
@@ -51,7 +50,6 @@ var tlrn_categories = [
     "Debris in the carriageway",
     "Fallen Tree",
     "Flooding",
-    "Flytipping (TfL)",
     "Graffiti / Flyposting (non-offensive)",
     "Graffiti / Flyposting (offensive)",
     "Graffiti / Flyposting on street light (non-offensive)",
@@ -72,6 +70,7 @@ var tlrn_categories = [
     "Scaffolding blocking carriageway or footway",
     "Single Light out (street light)",
     "Standing water",
+    "Street Light - Equipment damaged, pole leaning",
     "Unstable hoardings",
     "Unstable scaffolding",
     "Worn out road markings"

@@ -272,9 +272,11 @@ sub by_category_ajax_data : Private {
     }
 
     my $non_public = $c->stash->{non_public_categories}->{$category};
+    my $anon_button = ($c->cobrand->allow_anonymous_reports($category) eq 'button');
     my $body = {
         bodies => [ map { $_->name } @bodies ],
         $non_public ? ( non_public => JSON->true ) : (),
+        $anon_button ? ( allow_anonymous => JSON->true ) : (),
     };
 
     if ( $c->stash->{category_extras}->{$category} && @{ $c->stash->{category_extras}->{$category} } >= 1 ) {
@@ -328,13 +330,15 @@ sub disable_form_message : Private {
             $out{all} .= ' ' if $out{all};
             $out{all} .= $_->{description};
         } elsif (($_->{variable} || '') eq 'true' && @{$_->{values} || []}) {
+            my %category;
             foreach my $opt (@{$_->{values}}) {
                 if ($opt->{disable}) {
-                    $out{message} = $opt->{disable_message} || $_->{datatype_description};
-                    $out{code} = $_->{code};
-                    push @{$out{answers}}, $opt->{key};
+                    $category{message} = $opt->{disable_message} || $_->{datatype_description};
+                    $category{code} = $_->{code};
+                    push @{$category{answers}}, $opt->{key};
                 }
             }
+            push @{$out{questions}}, \%category if %category;
         }
     }
 
@@ -684,12 +688,12 @@ sub setup_categories_and_bodies : Private {
     my @bodies = $c->model('DB::Body')->active->for_areas(keys %$all_areas)->all;
     my %bodies = map { $_->id => $_ } @bodies;
 
-    my $contacts                #
-      = $c                      #
-      ->model('DB::Contact')    #
-      ->active
-      ->search( { 'me.body_id' => [ keys %bodies ] }, { prefetch => 'body' } );
+    $c->cobrand->call_hook(munge_report_new_bodies => \%bodies);
+
+    my $contacts = $c->model('DB::Contact')->for_new_reports($c, \%bodies);
     my @contacts = $c->cobrand->categories_restriction($contacts)->all_sorted;
+
+    $c->cobrand->call_hook(munge_report_new_contacts => \@contacts);
 
     # variables to populate
     my %bodies_to_list = ();       # Bodies with categories assigned
@@ -768,7 +772,7 @@ sub setup_categories_and_bodies : Private {
     $c->stash->{bodies} = \%bodies;
     $c->stash->{contacts} = \@contacts;
     $c->stash->{bodies_to_list} = \%bodies_to_list;
-    $c->stash->{bodies_ids} = [ map { $_->id } @bodies];
+    $c->stash->{bodies_ids} = [ map { $_ } keys %bodies ];
     $c->stash->{category_options} = \@category_options;
     $c->stash->{category_extras}  = \%category_extras;
     $c->stash->{category_extras_hidden}  = \%category_extras_hidden;
@@ -980,7 +984,7 @@ sub process_report : Private {
         $c->stash->{contributing_as_anonymous_user} = $user->contributing_as('anonymous_user', $c, $c->stash->{bodies});
     }
     # This is also done in process_user, but is needed here for anonymous() just below
-    my $anon_button = $c->cobrand->allow_anonymous_reports eq 'button' && $c->get_param('report_anonymously');
+    my $anon_button = $c->cobrand->allow_anonymous_reports($params{category}) eq 'button' && $c->get_param('report_anonymously');
     if ($anon_button) {
         $c->stash->{contributing_as_anonymous_user} = 1;
         $c->stash->{contributing_as_body} = undef;
@@ -1028,8 +1032,7 @@ sub process_report : Private {
         }
 
         # check that we've not indicated we only want to sent to a single body
-        # and if we find a matching one then only send to that. e.g. if we clicked
-        # on a TfL road on the map.
+        # and if we find a matching one then only send to that.
         my $body_string = do {
             if (my $single_body_only = $c->get_param('single_body_only')) {
                 my $body = $c->model('DB::Body')->search({ name => $single_body_only })->first;
@@ -1243,7 +1246,7 @@ sub check_for_errors : Private {
     if ( $c->cobrand->allow_anonymous_reports ) {
         my $anon_details = $c->cobrand->anonymous_account;
         $report->user->email(undef) if $report->user->email eq $anon_details->{email};
-        $report->name(undef) if $report->name eq $anon_details->{name};
+        $report->name(undef) if $report->name && $report->name eq $anon_details->{name};
     }
 
     return;
@@ -1546,6 +1549,8 @@ sub check_for_category : Private {
 
     my $category = $c->get_param('category') || $c->stash->{report}->category || '';
     $category = '' if $category eq _('Loading...') || $category eq _('-- Pick a category --');
+    # Just check to see if the filter had an option
+    $category ||= $c->get_param('filter_category') || '';
     $c->stash->{category} = $category;
 
     # Bit of a copy of set_report_extras, because we need the results here, but
@@ -1573,16 +1578,19 @@ sub check_for_category : Private {
         my $disable_form_messages = $c->forward('disable_form_message');
         if ($disable_form_messages->{all}) {
             $c->stash->{disable_form_message} = $disable_form_messages->{all};
-        } elsif (my $code = $disable_form_messages->{code}) {
-            my $answer = $c->get_param($code);
-            my $message = $disable_form_messages->{message};
-            if ($answer) {
-                foreach (@{$disable_form_messages->{answers}}) {
-                    if ($answer eq $_) {
-                        $c->stash->{disable_form_message} = $message;
+        } elsif (my $questions = $disable_form_messages->{questions}) {
+            foreach my $question (@$questions) {
+                my $answer = $c->get_param($question->{code});
+                my $message = $question->{message};
+                if ($answer) {
+                    foreach (@{$question->{answers}}) {
+                        if ($answer eq $_) {
+                            $c->stash->{disable_form_message} = $message;
+                        }
                     }
                 }
-            } else {
+            }
+            if (!$c->stash->{disable_form_message}) {
                 $c->stash->{have_disable_qn_to_answer} = 1;
             }
         }

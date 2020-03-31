@@ -127,6 +127,8 @@ sub edit : Chained('body') : PathPart('') : Args(0) {
     # to display email addresses as text
     $c->stash->{template} = 'admin/bodies/body.html';
     $c->forward('/admin/fetch_contacts');
+    $c->stash->{contacts} = [ $c->stash->{contacts}->all ];
+    $c->forward('/report/stash_category_groups', [ $c->stash->{contacts}, 0 ]);
 
     return 1;
 }
@@ -248,7 +250,8 @@ sub update_contact : Private {
     my $email = $c->get_param('email');
     $email =~ s/\s+//g;
     my $send_method = $c->get_param('send_method') || $contact->body->send_method || "";
-    unless ( $send_method eq 'Open311' ) {
+    my $email_unchanged = $contact->email && $email && $contact->email eq $email;
+    unless ( $send_method eq 'Open311' || $email_unchanged ) {
         $errors{email} = _('Please enter a valid email') unless is_valid_email_list($email) || $email eq 'REFUSED';
     }
 

@@ -453,15 +453,24 @@ $.extend(fixmystreet.set_up, {
         }
         if (data && data.non_public) {
             $(".js-hide-if-private-category").hide();
-            $(".js-hide-if-public-category").show();
+            $(".js-hide-if-public-category").removeClass("hidden-js").show();
         } else {
             $(".js-hide-if-private-category").show();
             $(".js-hide-if-public-category").hide();
         }
+        if (data && data.allow_anonymous) {
+            $('.js-show-if-anonymous').removeClass('hidden-js');
+        } else {
+            $('.js-show-if-anonymous').addClass('hidden-js');
+        }
 
-        if (fixmystreet.message_controller && data && data.disable_form && data.disable_form.answers) {
-            $('#form_' + data.disable_form.code).on('change.category', function() {
-                $(fixmystreet).trigger('report_new:category_change');
+        if (fixmystreet.message_controller && data && data.disable_form && data.disable_form.questions) {
+            $.each(data.disable_form.questions, function(_, question) {
+                if (question.message && question.code) {
+                    $('#form_' + question.code).on('change.category', function() {
+                        $(fixmystreet).trigger('report_new:category_change');
+                    });
+                }
             });
         }
 
@@ -680,6 +689,10 @@ $.extend(fixmystreet.set_up, {
       $originalInput.hide();
 
       $dropzone.insertAfter($originalInput);
+      var default_message = translation_strings.upload_default_message;
+      if ($("html").hasClass("mobile")) {
+        default_message = translation_strings.upload_default_message_mobile;
+      }
       var photodrop = new Dropzone($dropzone[0], {
         url: '/photo/upload',
         paramName: 'photo',
@@ -691,7 +704,7 @@ $.extend(fixmystreet.set_up, {
         resizeHeight: 2048,
         resizeQuality: 0.6,
         acceptedFiles: 'image/jpeg,image/pjpeg,image/gif,image/tiff,image/png',
-        dictDefaultMessage: translation_strings.upload_default_message,
+        dictDefaultMessage: default_message,
         dictCancelUploadConfirmation: translation_strings.upload_cancel_confirmation,
         dictInvalidFileType: translation_strings.upload_invalid_file_type,
         dictMaxFilesExceeded: translation_strings.upload_max_files_exceeded,
@@ -829,10 +842,8 @@ $.extend(fixmystreet.set_up, {
 
   map_controls: function() {
     //add links container (if its not there)
-    if (fixmystreet.cobrand != 'zurich') {
-        if ($('#sub_map_links').length === 0) {
-            $('<p class="sub-map-links" id="sub_map_links" />').insertAfter($('#map'));
-        }
+    if ($('#sub_map_links').length === 0) {
+        $('<p class="sub-map-links" id="sub_map_links" />').insertAfter($('#map'));
     }
 
     if ($('.mobile').length) {
@@ -1279,9 +1290,13 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
     if (savePushState !== false) {
         if ('pushState' in history) {
             var newReportUrl = '/report/new?longitude=' + lonlats.url.lon + '&latitude=' + lonlats.url.lat;
-            history.pushState({
-                newReportAtLonlat: lonlats.state
-            }, null, newReportUrl);
+            var newState = { newReportAtLonlat: lonlats.state };
+            // If we're already in the reporting place, we want to replace state, it's a pin move
+            if (fixmystreet.page === 'new') {
+                history.replaceState(newState, null, newReportUrl);
+            } else {
+                history.pushState(newState, null, newReportUrl);
+            }
         }
     }
 
@@ -1334,10 +1349,14 @@ fixmystreet.fetch_reporting_data = function() {
                         message: details.disable_form.all
                     });
                 }
-                if (details.disable_form.answers) {
-                    details.disable_form.category = category;
-                    details.disable_form.keep_category_extras = true;
-                    fixmystreet.message_controller.register_category(details.disable_form);
+                if (details.disable_form.questions) {
+                    $.each(details.disable_form.questions, function(_, question) {
+                        if (question.message && question.code) {
+                            question.category = category;
+                            question.keep_category_extras = true;
+                            fixmystreet.message_controller.register_category(question);
+                        }
+                    });
                 }
             });
         }
@@ -1445,6 +1464,9 @@ fixmystreet.display = {
             height = $map_box.height();
         $map_box.append(
             '<p class="sub-map-links" id="mob_sub_map_links">' +
+            '<a href="#" id="problems_nearby">' +
+                translation_strings.back +
+            '</a>' +
             '<a href="#" id="try_again">' +
                 translation_strings.try_again +
             '</a>' +
@@ -1457,25 +1479,32 @@ fixmystreet.display = {
             width: width,
             height: height
         });
-        $('#try_again').click(function(e){
+
+        $('.mobile-map-banner span').text(translation_strings.right_place);
+
+        $('#problems_nearby').click(function(e){
             e.preventDefault();
             history.back();
         });
 
-        $('.mobile-map-banner span').text(translation_strings.right_place);
+        $('#try_again').click(function(e) {
+            e.preventDefault();
+            $('#mob_ok').click();
+        });
 
         // mobile user clicks 'ok' on map
         $('#mob_ok').toggle(function(){
             //scroll the height of the map box instead of the offset
             //of the #side-form or whatever as we will probably want
             //to do this on other pages where #side-form might not be
-            $('html, body').animate({ scrollTop: height-60 }, 1000, function(){
+            $('html, body').animate({ scrollTop: height-60 }, 500, function(){
                 $('html').removeClass('only-map');
                 $('#mob_sub_map_links').addClass('map_complete');
                 $('#mob_ok').text(translation_strings.map);
             });
         }, function(){
-            $('html, body').animate({ scrollTop: 0 }, 1000, function(){
+            var current = $('html, body').scrollTop();
+            $('html, body').animate({ scrollTop: 0 }, 500/height*current, function(){
                 $('html').addClass('only-map');
                 $('#mob_sub_map_links').removeClass('map_complete');
                 $('#mob_ok').text(translation_strings.ok);
@@ -1716,9 +1745,9 @@ $(function() {
                     // location.href is something like foo.com/around?pc=abc-123,
                     // which we pass into fixmystreet.display.reports_list() as a fallback
                     // in case the list isn't already in the DOM.
-                    $('#filter_categories').add('#statuses').add('#sort').find('option')
-                        .prop('selected', function() { return this.defaultSelected; })
-                        .trigger('change.multiselect');
+                    var filters = $('#filter_categories').add('#statuses').add('#sort');
+                    filters.find('option').prop('selected', function() { return this.defaultSelected; });
+                    filters.trigger('change.multiselect');
                     if (fixmystreet.utils && fixmystreet.utils.parse_query_string) {
                         var qs = fixmystreet.utils.parse_query_string();
                         var page = qs.p || 1;

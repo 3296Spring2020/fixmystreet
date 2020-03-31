@@ -32,6 +32,7 @@ my ($opts, $usage) = describe_options(
     ['no=s', 'no answer to question'],
     ['message=s', 'message to be shown if form disabled', { required => 1 } ],
     ['send_method=s', 'send method to restrict categories to' ],
+    ['group=s', 'group to restrict categories to' ],
     ['help|h', "print usage message and exit" ],
 );
 $usage->die if $opts->help;
@@ -43,8 +44,8 @@ if (!$opts->commit) {
 my $field;
 
 if ( $opts->mode eq 'questions' ) {
-    die "questions, code, yes and no required"
-        unless $opts->questions && $opts->code && $opts->yes && $opts->no;
+    die "question, code, yes and no required"
+        unless $opts->question && $opts->code && $opts->yes && $opts->no;
 
     $field = {
         order => 0,
@@ -87,6 +88,10 @@ unless ($body) {
 my $contacts = $body->contacts->not_deleted;
 $contacts = $contacts->search({ send_method => $opts->send_method }) if $opts->send_method;
 foreach my $category ($contacts->all) {
+    # Check if we're just adding the message to a certain group
+    if ($opts->group) {
+        next unless grep { $_ eq $opts->group } @{$category->groups};
+    }
     my $found = $category->get_extra_field(code => $field->{code});
     if ($found) {
         say colored("Updating ", 'red') . $field->{code} . " message disable form on " . $category->category . ", " . $opts->body;

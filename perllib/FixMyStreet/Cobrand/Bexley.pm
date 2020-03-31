@@ -83,14 +83,17 @@ sub lookup_site_code_config {
 }
 
 sub open311_config {
-    my ($self, $row, $h, $params, $contact) = @_;
+    my ($self, $row, $h, $params) = @_;
 
     $params->{multi_photos} = 1;
+}
 
-    my $extra = $row->get_extra_fields;
+sub open311_extra_data {
+    my ($self, $row, $h, $extra, $contact) = @_;
 
+    my $open311_only;
     if ($contact->email =~ /^Confirm/) {
-        push @$extra,
+        push @$open311_only,
             { name => 'report_url', description => 'Report URL',
               value => $h->{url} },
             { name => 'title', description => 'Title',
@@ -123,7 +126,7 @@ sub open311_config {
         }
     }
 
-    $row->set_extra_fields(@$extra);
+    return $open311_only;
 }
 
 sub admin_user_domain { 'bexley.gov.uk' }
@@ -165,10 +168,13 @@ sub open311_post_send {
         $outofhours_email = 1;
     } elsif ($row->category eq 'Gulley covers' || $row->category eq 'Manhole covers') {
         my $reportType = $row->get_extra_field_value('reportType') || '';
-        $p1_email = 1 if $reportType eq 'Cover missing';
-        $p1_email = 1 if $dangerous eq 'Yes';
+        if ($reportType eq 'Cover missing' || $dangerous eq 'Yes') {
+            $p1_email = 1;
+            $outofhours_email = 1;
+        }
     } elsif ($row->category eq 'Damage to kerb' || $row->category eq 'Damaged road' || $row->category eq 'Damaged pavement') {
         $p1_email = 1;
+        $outofhours_email = 1;
     } elsif (!$lighting{$row->category}) {
         $p1_email = 1 if $dangerous eq 'Yes';
         $outofhours_email = 1 if $dangerous eq 'Yes';
@@ -209,7 +215,7 @@ sub dashboard_export_problems_add_columns {
 
     my %groups;
     if ($c->stash->{body}) {
-        %groups = FixMyStreet::DB->resultset('Contact')->active->search({
+        %groups = FixMyStreet::DB->resultset('Contact')->search({
             body_id => $c->stash->{body}->id,
         })->group_lookup;
     }

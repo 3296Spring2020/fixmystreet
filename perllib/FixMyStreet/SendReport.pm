@@ -15,8 +15,7 @@ has 'to' => ( is => 'rw', isa => ArrayRef, default => sub { [] } );
 has 'bcc' => ( is => 'rw', isa => ArrayRef, default => sub { [] } );
 has 'success' => ( is => 'rw', isa => Bool, default => 0 );
 has 'error' => ( is => 'rw', isa => Str, default => '' );
-has 'unconfirmed_counts' => ( 'is' => 'rw', isa => HashRef, default => sub { {} } );
-has 'unconfirmed_notes' => ( 'is' => 'rw', isa => HashRef, default => sub { {} } );
+has 'unconfirmed_data' => ( 'is' => 'rw', isa => HashRef, default => sub { {} } );
 
 
 sub should_skip {
@@ -63,7 +62,7 @@ sub add_body {
 sub fetch_category {
     my ($self, $body, $row, $category_override) = @_;
 
-    my $contact = $row->result_source->schema->resultset("Contact")->not_deleted->find( {
+    my $contact = $row->result_source->schema->resultset("Contact")->find( {
         body_id => $body->id,
         category => $category_override || $row->category,
     } );

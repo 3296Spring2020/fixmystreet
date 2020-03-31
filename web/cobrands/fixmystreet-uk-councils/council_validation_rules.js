@@ -20,7 +20,7 @@ body_validation_rules = {
           maxlength: 1750
         }
     },
-    'Buckinghamshire County Council': confirm_validation_rules,
+    'Buckinghamshire Council': confirm_validation_rules,
     'Cheshire East Council': confirm_validation_rules,
     'Hounslow Borough Council': confirm_validation_rules,
     'Lincolnshire County Council': confirm_validation_rules,
@@ -46,7 +46,12 @@ body_validation_rules = {
           maxlength: 50
         }
     },
-    'Peterborough City Council': confirm_validation_rules,
+    'Peterborough City Council': $.extend({
+        title: {
+          required: true,
+          maxlength: 50
+        }
+    }, confirm_validation_rules),
     'Rutland County Council': {
         title: {
           required: true,
@@ -57,9 +62,4 @@ body_validation_rules = {
           maxlength: 40
         }
     }
-};
-
-body_validation_rules['Peterborough City Council'].title = {
-  required: true,
-  maxlength: 50
 };

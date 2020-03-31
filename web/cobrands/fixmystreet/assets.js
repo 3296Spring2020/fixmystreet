@@ -31,7 +31,9 @@ OpenLayers.Layer.VectorAsset = OpenLayers.Class(OpenLayers.Layer.Vector, {
           group = $('select#category_group').val(),
           layer = this.fixmystreet,
           relevant;
-      if (layer.asset_group) {
+      if (layer.relevant) {
+          relevant = layer.relevant({category: category, group: group});
+      } else if (layer.asset_group) {
           relevant = (layer.asset_group === group);
       } else {
           relevant = (OpenLayers.Util.indexOf(layer.asset_category, category) != -1);
@@ -72,7 +74,10 @@ OpenLayers.Layer.VectorAsset = OpenLayers.Class(OpenLayers.Layer.Vector, {
         if (!fixmystreet.markers.getVisibility() || !(this.getVisibility() && this.inRange)) {
             return;
         }
-        var threshold = this.fixmystreet.snap_threshold || 50; // metres
+        var threshold = 50; // metres
+        if ( this.fixmystreet.snap_threshold || this.fixmystreet.snap_threshold === 0 ) {
+          threshold = this.fixmystreet.snap_threshold;
+        }
         var marker = fixmystreet.markers.features[0];
         if (marker === undefined) {
             // No marker to be found so bail out
@@ -587,7 +592,10 @@ function construct_layer_options(options, protocol) {
         protocol: protocol,
         visibility: false,
         maxResolution: max_resolution,
-        minResolution: options.min_resolution,
+        // If minimum resolution not specified, we only want to set a default
+        // if max_resolution is specified, otherwise the default minimum will
+        // be used to construct all the resolutions and it won't work
+        minResolution: options.min_resolution || (max_resolution ? 0.00001 : undefined),
         styleMap: options.stylemap || get_asset_stylemap(),
         assets: true
     };
@@ -637,10 +645,10 @@ function construct_layer_options(options, protocol) {
 }
 
 function construct_layer_class(options) {
-    var layer_class = options.class || OpenLayers.Layer.VectorAsset;
-    if (options.usrn || options.road) {
-        layer_class = OpenLayers.Layer.VectorNearest;
-    }
+    var default_class = (options.usrn || options.road) ? OpenLayers.Layer.VectorNearest : OpenLayers.Layer.VectorAsset;
+
+    var layer_class = options.class || default_class;
+
     return layer_class;
 }
 
@@ -796,6 +804,37 @@ fixmystreet.assets = {
         popupYOffset: -40,
         graphicOpacity: 1.0
     }),
+
+    construct_named_select_style: function(label) {
+        var f = $.extend({
+            label: label,
+            labelOutlineColor: "white",
+            labelOutlineWidth: 3,
+            labelYOffset: 65,
+            fontSize: '15px',
+            fontWeight: 'bold'
+        }, fixmystreet.assets.style_default_select.defaultStyle);
+        return new OpenLayers.Style(f);
+    },
+    named_select_action_found: function(asset) {
+        var id = asset.attributes[this.fixmystreet.feature_code] || '';
+        if (id !== '') {
+            var data = { id: id, name: this.fixmystreet.asset_item };
+            if (this.fixmystreet.construct_asset_name) {
+                data = this.fixmystreet.construct_asset_name(id) || data;
+            }
+            $('.category_meta_message').html('You have selected ' + data.name + ' <b>' + data.id + '</b>');
+        } else {
+            var message = this.fixmystreet.asset_item_message;
+            message = message.replace('ITEM', this.fixmystreet.asset_item);
+            $('.category_meta_message').html(message);
+        }
+    },
+    named_select_action_not_found: function() {
+        var message = this.fixmystreet.asset_item_message;
+        message = message.replace('ITEM', this.fixmystreet.asset_item);
+        $('.category_meta_message').html(message);
+    },
 
     selectedFeature: function() {
         return selected_feature;

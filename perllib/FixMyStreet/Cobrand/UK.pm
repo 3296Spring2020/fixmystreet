@@ -6,6 +6,7 @@ use JSON::MaybeXS;
 use mySociety::MaPit;
 use mySociety::VotingArea;
 use Utils;
+use HighwaysEngland;
 
 sub country             { return 'GB'; }
 sub area_types          { [ 'DIS', 'LBO', 'MTD', 'UTA', 'CTY', 'COI', 'LGD' ] }
@@ -89,17 +90,10 @@ sub geocode_postcode {
             latitude  => $location->{wgs84_lat},
             longitude => $location->{wgs84_lon},
         };
+    } elsif (my $junction_location = HighwaysEngland::junction_lookup($s)) {
+        return $junction_location;
     }
     return {};
-}
-
-sub remove_redundant_areas {
-  my $self = shift;
-  my $all_areas = shift;
-
-  # Norwich is responsible for everything in its areas, not Norfolk
-  delete $all_areas->{2233}    #
-    if $all_areas->{2391};
 }
 
 sub short_name {
@@ -370,9 +364,11 @@ sub get_body_handler_for_problem {
     if ($row->to_body_named('TfL')) {
         return FixMyStreet::Cobrand::TfL->new;
     }
+    # Do not do anything for Highways England here, as we don't want it to
+    # treat this as a cobrand for e.g. submit report emails made on .com
 
     my @bodies = values %{$row->bodies};
-    my %areas = map { %{$_->areas} } grep { $_->name ne 'TfL' } @bodies;
+    my %areas = map { %{$_->areas} } grep { $_->name !~ /TfL|Highways England/ } @bodies;
 
     my $cobrand = FixMyStreet::Cobrand->body_handler(\%areas);
     return $cobrand if $cobrand;

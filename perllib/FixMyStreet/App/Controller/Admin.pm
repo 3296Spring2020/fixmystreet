@@ -73,6 +73,9 @@ sub index : Path : Args(0) {
         bodies_str => { '!=', undef },
         # Ignore very recent ones that probably just haven't been sent yet
         confirmed => { '<', \"current_timestamp - '5 minutes'::interval" },
+    },
+    {
+        order_by => 'confirmed',
     } )->all;
     $c->stash->{unsent_reports} = \@unsent;
 
@@ -177,7 +180,7 @@ sub fetch_contacts : Private {
 
     my $contacts = $c->stash->{body}->contacts->search(undef, { order_by => [ 'category' ] } );
     $c->stash->{contacts} = $contacts;
-    $c->stash->{live_contacts} = $contacts->not_deleted;
+    $c->stash->{live_contacts} = $contacts->not_deleted_admin;
     $c->stash->{any_not_confirmed} = $contacts->search({ state => 'unconfirmed' })->count;
 
     if ( $c->get_param('text') && $c->get_param('text') eq '1' ) {
@@ -369,8 +372,8 @@ sub set_allowed_pages : Private {
 sub get_user : Private {
     my ( $self, $c ) = @_;
 
-    my $user = $c->req->remote_user();
-    $user ||= ($c->user && $c->user->name);
+    my $user = ($c->user && $c->user->name);
+    $user ||= $c->req->remote_user();
     $user ||= '';
 
     return $user;

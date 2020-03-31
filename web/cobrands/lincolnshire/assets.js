@@ -8,7 +8,6 @@ var defaults = {
     wfs_url: "https://tilma.mysociety.org/mapserver/lincs",
     asset_type: 'spot',
     max_resolution: 2.388657133579254,
-    min_resolution: 0.5971642833948135,
     asset_id_field: 'Confirm_CA',
     attributes: {
         central_asset_id: 'Confirm_CA',
@@ -135,10 +134,12 @@ fixmystreet.assets.add(defaults, {
     wfs_feature: "NSG",
     always_visible: true,
     non_interactive: true,
+    max_resolution: 9.554628534317017,
     usrn: {
         attribute: 'Site_Code',
         field: 'site_code'
     },
+    nearest_radius: 20,
     stylemap: fixmystreet.assets.stylemap_invisible
 });
 

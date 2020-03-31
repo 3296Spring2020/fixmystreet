@@ -4,10 +4,7 @@ if (!fixmystreet.maps) {
     return;
 }
 
-var is_live = false;
-if ( location.hostname === 'www.fixmystreet.com' || location.hostname == 'fixmystreet.northamptonshire.gov.uk' ) {
-    is_live = true;
-}
+var is_live = !fixmystreet.staging;
 
 var layers = [
   /*
@@ -260,8 +257,8 @@ var layers = [
   "categories": [ "Damaged / Missing / Facing Wrong Way", "Obscured by vegetation or Dirty" ],
   "item_name": "sign",
   "layer_name": "Signs",
-  "layer": is_live ? 60 : 303,
-  "version": is_live ? "60.2172-" : "303.1-"
+  "layer": 60,
+  "version": "60.2172-"
 },
 {
   "categories": [ "Shelter Damaged", "Sign/Pole Damaged" ],
@@ -333,11 +330,14 @@ var layers = [
 },
 {
   "categories": [
-    "Fallen Tree"
+      "Fallen Tree",
+      "Restricted Visibility / Overgrown / Overhanging",
+      "Restricted Visibility"
   ],
   "layer_name": "Tree",
-  "layer": is_live ? 307 : 228,
-  "version": is_live ? "307.6-" : "228.24-"
+  "layer": 307,
+  "version": "307.7-",
+  "snap_threshold": 0,
 },
 {
   "categories": [ "Safety Bollard - Damaged/Missing" ],
@@ -359,10 +359,33 @@ OpenLayers.Layer.NCCVectorAsset = OpenLayers.Class(OpenLayers.Layer.VectorAsset,
     CLASS_NAME: 'OpenLayers.Layer.NCCVectorAsset'
 });
 
+OpenLayers.Layer.NCCVectorNearest = OpenLayers.Class(OpenLayers.Layer.VectorNearest, {
+    feature_table: {},
+    initialize: function(name, options) {
+        OpenLayers.Layer.VectorNearest.prototype.initialize.apply(this, arguments);
+        this.events.register('beforefeatureadded', this, this.checkCanAddFeature);
+    },
+
+    destroyFeatures: function(features, options) {
+        OpenLayers.Layer.VectorNearest.prototype.destroyFeatures.apply(this, arguments);
+        this.feature_table = {};
+    },
+
+    checkCanAddFeature: function(obj) {
+      if (this.feature_table[obj.feature.fid]) {
+        return false;
+      }
+
+      this.feature_table[obj.feature.fid] = 1;
+    },
+
+    CLASS_NAME: 'OpenLayers.Layer.NCCVectorNearest'
+});
+
 // default options for northants assets include
 // a) checking for multiple assets in same location
 // b) preventing submission unless an asset is selected
-var northants_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaults, {
+var northants_defaults = $.extend(true, {}, fixmystreet.alloy_defaults, {
   class: OpenLayers.Layer.NCCVectorAsset,
   protocol_class: OpenLayers.Protocol.Alloy,
   http_options: {
@@ -430,13 +453,17 @@ $.each(layers, function(index, layer) {
         if (layer.max_resolution) {
           options.max_resolution = layer.max_resolution;
         }
+        if (layer.snap_threshold || layer.snap_threshold === 0) {
+          options.snap_threshold = layer.snap_threshold;
+        }
         fixmystreet.assets.add(northants_defaults, options);
     }
 });
 
 // NCC roads layers which prevent report submission unless we have selected
 // an asset.
-var northants_road_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaults, {
+var northants_road_defaults = $.extend(true, {}, fixmystreet.alloy_defaults, {
+    class: OpenLayers.Layer.NCCVectorNearest,
     protocol_class: OpenLayers.Protocol.Alloy,
     http_options: {
         environment: is_live ? 26 : 28
@@ -481,8 +508,8 @@ var barrier_style = new OpenLayers.Style({
 
 fixmystreet.assets.add(northants_road_defaults, {
     http_options: {
-      layerid: is_live ? 1068 : 230,
-      layerVersion: is_live ? '1068.1-' : '230.4-',
+      layerid: 1068,
+      layerVersion: '1068.1-',
     },
     stylemap: new OpenLayers.StyleMap({
         'default': barrier_style
@@ -532,23 +559,73 @@ fixmystreet.assets.add(northants_road_defaults, {
         "Icy Footpath",
         "Icy Road",
         "Missed published Gritted Route",
+        "Fallen Tree",
         "Restricted Visibility / Overgrown / Overhanging",
         "Restricted Visibility"
     ]
 });
 
 
+function ncc_match_prow_type(f, styleId) {
+    return f &&
+           f.attributes &&
+           f.attributes.layerStyleId &&
+           f.attributes.layerStyleId == styleId;
+}
+
+function ncc_prow_is_fp(f) {
+    return ncc_match_prow_type(f, is_live ? 6190 : 1454);
+}
+
+function ncc_prow_is_bw(f) {
+    return ncc_match_prow_type(f, is_live ? 6192 : 1453);
+}
+
+function ncc_prow_is_boat(f) {
+    return ncc_match_prow_type(f, is_live ? 6193: 1455);
+}
+
+var rule_footpath = new OpenLayers.Rule({
+    filter: new OpenLayers.Filter.FeatureId({
+        type: OpenLayers.Filter.Function,
+        evaluate: ncc_prow_is_fp
+    }),
+    symbolizer: {
+        strokeColor: "#800000",
+    }
+});
+var rule_boat = new OpenLayers.Rule({
+    filter: new OpenLayers.Filter.FeatureId({
+        type: OpenLayers.Filter.Function,
+        evaluate: ncc_prow_is_boat
+    }),
+    symbolizer: {
+        strokeColor: "#964b00",
+    }
+});
+var rule_bridleway = new OpenLayers.Rule({
+    filter: new OpenLayers.Filter.FeatureId({
+        type: OpenLayers.Filter.Function,
+        evaluate: ncc_prow_is_bw
+    }),
+    symbolizer: {
+        strokeColor: "#008000",
+    }
+});
+
 var prow_style = new OpenLayers.Style({
     fill: false,
     strokeColor: "#115511",
-    strokeOpacity: 0.1,
+    strokeOpacity: 0.8,
     strokeWidth: 7
 });
 
+prow_style.addRules([rule_footpath, rule_boat, rule_bridleway]);
+
 fixmystreet.assets.add(northants_road_defaults, {
     http_options: {
-      layerid: 173,
-      layerVersion: '173.3-',
+      layerid: is_live ? 1110 : 310,
+      layerVersion: is_live ? '1110.1-' : '310.1-',
     },
     stylemap: new OpenLayers.StyleMap({
         'default': prow_style

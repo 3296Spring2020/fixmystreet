@@ -49,10 +49,10 @@ sub restriction {
 }
 
 # UK cobrands assume that each MapIt area ID maps both ways with one
-# body. Except TfL.
+# body. Except TfL and Highways England.
 sub body {
     my $self = shift;
-    my $body = FixMyStreet::DB->resultset('Body')->for_areas($self->council_area_id)->search({ name => { '!=', 'TfL' } })->first;
+    my $body = FixMyStreet::DB->resultset('Body')->for_areas($self->council_area_id)->search({ name => { 'not_in', ['TfL', 'Highways England'] } })->first;
     return $body;
 }
 
@@ -130,7 +130,11 @@ sub users_restriction {
         push @$or_query, email => @domains;
     }
 
-    return $rs->search($or_query);
+    my $query = {
+        is_superuser => 0,
+        -or => $or_query
+    };
+    return $rs->search($query);
 }
 
 sub base_url {
@@ -235,8 +239,8 @@ sub owns_problem {
     } else { # Object
         @bodies = values %{$report->bodies};
     }
-    # Want to ignore the TfL body that covers London councils
-    my %areas = map { %{$_->areas} } grep { $_->name ne 'TfL' } @bodies;
+    # Want to ignore the TfL body that covers London councils, and HE that is all England
+    my %areas = map { %{$_->areas} } grep { $_->name !~ /TfL|Highways England/ } @bodies;
     return $areas{$self->council_area_id} ? 1 : undef;
 }
 
@@ -261,7 +265,9 @@ sub base_url_for_report {
 
 sub relative_url_for_report {
     my ( $self, $report ) = @_;
-    return $self->owns_problem($report) ? "" : FixMyStreet->config('BASE_URL');
+    return "" if $self->owns_problem($report);
+    return FixMyStreet::Cobrand::TfL->base_url if $report->cobrand eq 'tfl';
+    return FixMyStreet->config('BASE_URL');
 }
 
 sub admin_allow_user {
@@ -289,14 +295,35 @@ sub prefill_report_fields_for_inspector { 1 }
 
 sub social_auth_disabled { 1 }
 
-sub munge_report_new_category_list {
-    my ($self, $options, $contacts, $extras) = @_;
+sub munge_report_new_bodies {
+    my ($self, $bodies) = @_;
+
+    my %bodies = map { $_->name => 1 } values %$bodies;
+    if ( $bodies{'TfL'} ) {
+        # Presented categories vary if we're on/off a red route
+        my $tfl = FixMyStreet::Cobrand::TfL->new({ c => $self->{c} });
+        $tfl->munge_surrounding_london($bodies);
+    }
+
+    if ( $bodies{'Highways England'} ) {
+        my $c = $self->{c};
+        my $he = FixMyStreet::Cobrand::HighwaysEngland->new({ c => $c });
+        my $on_he_road = $c->stash->{on_he_road} = $he->report_new_is_on_he_road;
+
+        if (!$on_he_road) {
+            %$bodies = map { $_->id => $_ } grep { $_->name ne 'Highways England' } values %$bodies;
+        }
+    }
+}
+
+sub munge_report_new_contacts {
+    my ($self, $contacts) = @_;
 
     my %bodies = map { $_->body->name => $_->body } @$contacts;
     if ( $bodies{'TfL'} ) {
         # Presented categories vary if we're on/off a red route
         my $tfl = FixMyStreet::Cobrand->get_class_for_moniker( 'tfl' )->new({ c => $self->{c} });
-        $tfl->munge_red_route_categories($options, $contacts);
+        $tfl->munge_red_route_categories($contacts);
     }
 }
 

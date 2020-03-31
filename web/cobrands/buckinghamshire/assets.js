@@ -19,7 +19,6 @@ var defaults = {
       'buckinghamshire': 2.116670900008467,
       'fixmystreet': 4.777314267158508
     },
-    min_resolution: 0.00001,
     asset_id_field: 'central_as',
     attributes: {
         central_asset_id: 'central_as',
@@ -27,7 +26,7 @@ var defaults = {
     },
     geometryName: 'msGeometry',
     srsName: "EPSG:27700",
-    body: "Buckinghamshire County Council",
+    body: "Buckinghamshire Council",
     strategy_class: OpenLayers.Strategy.FixMyStreet
 };
 
@@ -41,18 +40,9 @@ fixmystreet.assets.add(defaults, {
     asset_item: 'grit bin'
 });
 
-var streetlight_select = $.extend({
-    label: "${feature_id}",
-    labelOutlineColor: "white",
-    labelOutlineWidth: 3,
-    labelYOffset: 65,
-    fontSize: '15px',
-    fontWeight: 'bold'
-}, fixmystreet.assets.style_default_select.defaultStyle);
-
 var streetlight_stylemap = new OpenLayers.StyleMap({
   'default': fixmystreet.assets.style_default,
-  'select': new OpenLayers.Style(streetlight_select)
+  'select': fixmystreet.assets.construct_named_select_style("${feature_id}")
 });
 
 var streetlight_code_to_type = {
@@ -69,21 +59,16 @@ var streetlight_code_to_type = {
 
 var labeled_defaults = $.extend(true, {}, defaults, {
     select_action: true,
+    feature_code: 'feature_id',
     stylemap: streetlight_stylemap,
+    asset_item_message: 'You can pick a <b class="asset-spot">ITEM</b> from the map &raquo;',
+    construct_asset_name: function(id) {
+        var code = id.replace(/[0-9]/g, '');
+        return {id: id, name: streetlight_code_to_type[code]};
+    },
     actions: {
-        asset_found: function(asset) {
-          var id = asset.attributes.feature_id || '';
-          if (id !== '') {
-              var code = id.replace(/[0-9]/g, '');
-              var asset_name = streetlight_code_to_type[code] || this.fixmystreet.asset_item;
-              $('.category_meta_message').html('You have selected ' + asset_name + ' <b>' + id + '</b>');
-          } else {
-              $('.category_meta_message').html('You can pick a <b class="asset-spot">' + this.fixmystreet.asset_item + '</b> from the map &raquo;');
-          }
-        },
-        asset_not_found: function() {
-           $('.category_meta_message').html('You can pick a <b class="asset-spot">' + this.fixmystreet.asset_item + '</b> from the map &raquo;');
-        }
+        asset_found: fixmystreet.assets.named_select_action_found,
+        asset_not_found: fixmystreet.assets.named_select_action_not_found
     }
 });
 
@@ -204,6 +189,22 @@ var non_bucks_types = [
     "P", // HW: PRIVATE
 ];
 
+// Since Buckinghamshire went unitary, if the user selects an ex-district
+// category we shouldn't enforce the road asset selection.
+var ex_district_categories = [
+    "Abandoned vehicles",
+    "Car Parks",
+    "Dog fouling",
+    "Flyposting",
+    "Flytipping",
+    "Graffiti",
+    "Parks/landscapes",
+    "Public toilets",
+    "Rubbish (refuse and recycling)",
+    "Street cleaning",
+    "Street nameplates"
+];
+
 // We show roads that Bucks are and aren't responsible for, and display a
 // message to the user if they click something Bucks don't maintain.
 var types_to_show = bucks_types.concat(non_bucks_types);
@@ -288,34 +289,30 @@ fixmystreet.assets.add(defaults, {
             fixmystreet.body_overrides.allow_send(layer.fixmystreet.body);
             fixmystreet.body_overrides.remove_only_send();
             fixmystreet.message_controller.road_found(layer, feature, function(feature) {
+                // If an ex-district category is selected, always allow report
+                // regardless of road ownership.
+                var cat = $('select#form_category').val();
+                if (cat === "-- Pick a category --" || OpenLayers.Util.indexOf(ex_district_categories, cat) != -1) {
+                    return true;
+                }
                 if (OpenLayers.Util.indexOf(bucks_types, feature.attributes.feature_ty) != -1) {
-                    var cat = $('select#form_category').val();
-                    if (cat === 'Flytipping') {
-                        fixmystreet.body_overrides.only_send(layer.fixmystreet.body);
-                    }
                     return true;
                 } else {
                     return false;
                 }
             }, msg_id);
-
-            // Make sure Flytipping related things reset
-            $('#category_meta').show();
-            $('#form_road-placement').attr('required', '');
         },
 
         not_found: function(layer) {
-            fixmystreet.body_overrides.do_not_send(layer.fixmystreet.body);
-            fixmystreet.body_overrides.remove_only_send();
-            fixmystreet.message_controller.road_not_found(layer);
-
-            // If flytipping is picked, we don't want to ask the extra question
+            // If an ex-district category is selected, always allow report.
             var cat = $('select#form_category').val();
-            if (cat === 'Flytipping') {
-                $('#category_meta').hide();
-                $('#form_road-placement').removeAttr('required');
+            if (cat === "-- Pick a category --" || OpenLayers.Util.indexOf(ex_district_categories, cat) != -1) {
+                fixmystreet.body_overrides.allow_send(layer.fixmystreet.body);
+                fixmystreet.body_overrides.remove_only_send();
             } else {
-                $('#category_meta').show();
+                fixmystreet.body_overrides.do_not_send(layer.fixmystreet.body);
+                fixmystreet.body_overrides.remove_only_send();
+                fixmystreet.message_controller.road_not_found(layer);
             }
         }
     },
@@ -326,18 +323,6 @@ fixmystreet.assets.add(defaults, {
     },
     filter_key: 'feature_ty',
     filter_value: types_to_show,
-});
-
-// As with the road found/not_found above, we want to change the destination
-// depending upon the answer to the extra question shown when on a road
-$("#problem_form").on("change", "#form_road-placement", function() {
-    if (this.value == 'road') {
-        fixmystreet.body_overrides.allow_send(defaults.body);
-        fixmystreet.body_overrides.only_send(defaults.body);
-    } else if (this.value == 'off-road') {
-        fixmystreet.body_overrides.do_not_send(defaults.body);
-        fixmystreet.body_overrides.remove_only_send();
-    }
 });
 
 fixmystreet.assets.add(defaults, {

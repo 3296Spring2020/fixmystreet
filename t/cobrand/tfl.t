@@ -1,6 +1,7 @@
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use FixMyStreet::Script::Reports;
+use FixMyStreet::Script::Questionnaires;
 
 # disable info logs for this test run
 FixMyStreet::App->log->disable('info');
@@ -16,6 +17,10 @@ LWP::Protocol::PSGI->register($tilma->to_psgi_app, host => 'tilma.mysociety.org'
 my $body = $mech->create_body_ok(2482, 'TfL');
 FixMyStreet::DB->resultset('BodyArea')->find_or_create({
     area_id => 2483, # Hounslow
+    body_id => $body->id,
+});
+FixMyStreet::DB->resultset('BodyArea')->find_or_create({
+    area_id => 2457, # Epsom Ewell, outside London, for bus stop test
     body_id => $body->id,
 });
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
@@ -208,6 +213,11 @@ FixMyStreet::override_config {
         do_not_reply_email => {
             tfl => 'fms-tfl-DO-NOT-REPLY@example.com',
         },
+        send_questionnaire => {
+            fixmystreet => {
+                TfL => 0,
+            }
+        },
     },
 }, sub {
 
@@ -283,6 +293,10 @@ subtest "test report creation anonymously by staff user" => sub {
     is $report->state, 'confirmed', "report confirmed";
     $mech->get_ok( '/report/' . $report->id );
 
+    $report->update({ state => 'fixed - council' });
+    my $json = $mech->get_ok_json('/around/nearby?latitude=' . $report->latitude . '&longitude=' . $report->longitude);
+    is @{$json->{pins}}, 2, 'right number of pins';
+
     is $report->bodies_str, $body->id;
     is $report->name, 'Anonymous user';
     is $report->user->email, 'anonymous@tfl.gov.uk';
@@ -331,6 +345,40 @@ subtest "test report creation and reference number" => sub {
 
     is $report->bodies_str, $body->id;
     is $report->name, 'Joe Bloggs';
+};
+
+subtest "test bus report creation outside London, .com" => sub {
+    $mech->host('www.fixmystreet.com');
+    $mech->get_ok('/report/new?latitude=51.345714&longitude=-0.227959');
+    $mech->content_lacks('Bus things');
+    $mech->host('tfl.fixmystreet.com');
+};
+
+subtest "test bus report creation outside London" => sub {
+    $mech->get_ok('/report/new?latitude=51.345714&longitude=-0.227959');
+    $mech->submit_form_ok(
+        {
+            with_fields => {
+                # A bus stop in East Ewell
+                latitude => 51.345714,
+                longitude => -0.227959,
+                title => 'Test outwith London',
+                detail => 'Test report details.',
+                name => 'Joe Bloggs',
+                may_show_name => '1',
+                category => 'Bus stops',
+            }
+        },
+        "submit good details"
+    );
+    $mech->content_contains('Your issue is on its way to Transport for London');
+    is_deeply $mech->page_errors, [], "check there were no errors";
+
+    my $report = FixMyStreet::DB->resultset("Problem")->find({ title => 'Test outwith London'});
+    ok $report, "Found the report";
+    is $report->state, 'confirmed', "report confirmed";
+    is $report->bodies_str, $body->id;
+    $report->delete;
 
     $mech->log_out_ok;
 };
@@ -541,11 +589,13 @@ subtest 'check correct base URL & title in AJAX pins' => sub {
 };
 
 subtest 'check report age on /around' => sub {
+    $mech->log_in_ok($staffuser->email);
     my $report = FixMyStreet::DB->resultset("Problem")->find({ title => 'Test Report 1'});
     $report->update({ state => 'confirmed' });
 
     $mech->get_ok( '/around?lat=' . $report->latitude . '&lon=' . $report->longitude );
     $mech->content_contains($report->title);
+    $mech->content_contains('item-list__item__borough">Bromley');
 
     $report->update({
         confirmed => \"current_timestamp-'7 weeks'::interval",
@@ -588,15 +638,24 @@ subtest 'TfL admin allows inspectors to be assigned to borough areas' => sub {
     $staffuser->update({ area_ids => undef}); # so login below doesn't break
 };
 
-subtest 'Leave an update on a shortlisted report, get an email' => sub {
-    my $report = FixMyStreet::DB->resultset("Problem")->find({ title => 'Test Report 1'});
-    $staffuser->add_to_planned_reports($report);
-    $mech->log_in_ok( $user->email );
-    $mech->get_ok('/report/' . $report->id);
-    $mech->submit_form_ok({ with_fields => { update => 'This is an update' }});
-    my $email = $mech->get_text_body_from_email;
-    like $email, qr/This is an update/;
-};
+my $report = FixMyStreet::DB->resultset("Problem")->find({ title => 'Test Report 1'});
+$report->update({ cobrand => 'fixmystreet' });
+$staffuser->add_to_planned_reports($report);
+
+for my $host ( 'www.fixmystreet.com', 'tfl.fixmystreet.com' ) {
+    subtest "Leave an update on a shortlisted report on $host, get an email" => sub {
+        $mech->host($host);
+        $mech->log_in_ok( $user->email );
+        $mech->get_ok('/report/' . $report->id);
+        $mech->submit_form_ok({ with_fields => { update => 'This is an update' }});
+        my $email = $mech->get_email;
+        my $text = $mech->get_text_body_from_email;
+        like $text, qr/This is an update/, 'Right email';
+        like $text, qr/street.tfl/, 'Right url';
+        like $text, qr/Street Care/, 'Right name';
+        like $email->as_string, qr/iEYI87gX6Upb\+tKYzrSmN83pTnv606AOtahHTepSm/, 'Right logo';
+    };
+}
 
 subtest 'TfL staff can access TfL admin' => sub {
     $mech->log_in_ok( $staffuser->email );
@@ -677,6 +736,12 @@ subtest 'Test public reports are visible on cobrands appropriately' => sub {
     $mech->content_contains('Test Bromley report');
     $mech->content_contains('https://street.tfl/report/' . $tfl_report->id);
     $mech->content_contains('Other problem');
+};
+
+subtest 'Test no questionnaire sending' => sub {
+    $report->update({ send_questionnaire => 1, whensent => \"current_timestamp-'7 weeks'::interval" });
+    FixMyStreet::Script::Questionnaires::send();
+    $mech->email_count_is(0);
 };
 
 };

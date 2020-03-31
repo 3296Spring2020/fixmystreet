@@ -525,6 +525,31 @@ sub tokenised_url {
     return "/M/". $token->token;
 }
 
+has view_token => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        my $token = FixMyStreet::DB->resultset('Token')->create({
+            scope => 'alert_to_reporter',
+            data => { id => $self->id }
+        });
+    },
+);
+
+=head2 view_url
+
+Return a url for this problem report that will always show it
+(even if e.g. a private report) but does not log the user in.
+
+=cut
+
+sub view_url {
+    my $self = shift;
+    return $self->url unless $self->non_public;
+    return "/R/" . $self->view_token->token;
+}
+
 =head2 is_hidden
 
 Returns 1 if the problem is in an hidden state otherwise 0.
@@ -1045,7 +1070,7 @@ sub pin_data {
 };
 
 sub static_map {
-    my ($self) = @_;
+    my ($self, %params) = @_;
 
     return unless $IM;
 
@@ -1053,7 +1078,11 @@ sub static_map {
         unless $FixMyStreet::Map::map_class->isa("FixMyStreet::Map::OSM");
 
     my $map_data = $FixMyStreet::Map::map_class->generate_map_data(
-        { cobrand => $self->get_cobrand_logged },
+        {
+            cobrand => $self->get_cobrand_logged,
+            distance => 1, # prevents the call to Gaze which isn't necessary
+            $params{zoom} ? ( zoom => $params{zoom} ) : (),
+        },
         latitude  => $self->latitude,
         longitude => $self->longitude,
         pins      => $self->used_map
@@ -1110,7 +1139,7 @@ sub static_map {
     $image->Extent( geometry => '512x384', gravity => 'NorthWest');
     $image->Extent( geometry => '512x320', gravity => 'SouthWest');
 
-    $image->Scale( geometry => "310x200>" );
+    $image->Scale( geometry => "310x200>" ) unless $params{full_size};
 
     my @blobs = $image->ImageToBlob(magick => 'jpeg');
     undef $image;

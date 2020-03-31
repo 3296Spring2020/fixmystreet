@@ -13,8 +13,15 @@
     // but undefined on new report page.
     var report_id = $("#report_inspect_form .js-report-id").text() || undefined;
 
+    // Don't make another call whilst one is in progress
+    var in_progress = false;
+
     function refresh_duplicate_list(evt, params, category) {
         if (params && params.skip_duplicates) {
+            return;
+        }
+
+        if (in_progress) {
             return;
         }
 
@@ -42,6 +49,10 @@
             url_params.pin_size = 'normal';
         }
 
+        if ($('html').hasClass('mobile')) {
+            url_params.inline_maps = 1;
+        }
+
         if (category && params && params.check_duplicates_dismissal ) {
             dismissed = category === dismissed_category;
             dismissed_category = category;
@@ -53,6 +64,7 @@
             }
         }
 
+        in_progress = true;
         $.ajax({
             url: nearby_url,
             data: url_params,
@@ -83,21 +95,29 @@
         $("#js-duplicate-reports ul").empty().prepend( $reports );
         fixmystreet.set_up.fancybox_images();
 
-        $('#js-duplicate-reports').hide().removeClass('hidden').slideDown();
+        $('#js-duplicate-reports').hide().removeClass('hidden').slideDown(function(){
+            in_progress = false;
+        });
         if ( $('#problem_form').length ) {
             $('.js-hide-if-invalid-category').slideUp();
             $('.js-hide-if-invalid-category_extras').slideUp();
         }
 
-        // Highlight map pin when hovering associated list item.
-        var timeout;
-        $reports.on('mouseenter', function(){
-            var id = parseInt( $(this).data('reportId'), 10 );
-            clearTimeout( timeout );
-            fixmystreet.maps.markers_highlight( id );
-        }).on('mouseleave', function(){
-            timeout = setTimeout( fixmystreet.maps.markers_highlight, 50 );
-        });
+        if (!fixmystreet.map.events.extensions.buttonclick.isDeviceTouchCapable) {
+            // Highlight map pin when hovering associated list item.
+            // (not on touchscreens though because a) the 'mouseenter' handler means
+            // two taps are required on the 'read more' button - one to highlight
+            // the list item and another to activate the button- and b) the pins
+            // might be scrolled off the top of the screen anyway e.g. on phones)
+            var timeout;
+            $reports.on('mouseenter', function(){
+                var id = parseInt( $(this).data('reportId'), 10 );
+                clearTimeout( timeout );
+                fixmystreet.maps.markers_highlight( id );
+            }).on('mouseleave', function(){
+                timeout = setTimeout( fixmystreet.maps.markers_highlight, 50 );
+            });
+        }
 
         // Add a "select this report" button, when on the report inspect form.
         if ( $('#report_inspect_form').length ) {
@@ -165,6 +185,7 @@
         $('#js-duplicate-reports').slideUp(function(){
             $(this).addClass('hidden');
             $(this).find('ul').empty();
+            in_progress = false;
         });
         if ($('#problem_form').length && take_effect()) {
             $('.js-hide-if-invalid-category').slideDown();

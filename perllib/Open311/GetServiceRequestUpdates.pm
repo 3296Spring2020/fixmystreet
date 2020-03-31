@@ -203,12 +203,14 @@ sub process_update {
 
         $comment->problem_state($state);
 
-        # if the comment is older than the last update do not
-        # change the status of the problem as it's tricky to
-        # determine the right thing to do. Allow the same time in
-        # case report/update created at same time (in external
-        # system). Only do this if the report is currently visible.
-        if ( $comment->created >= $p->lastupdate && $p->state ne $state && $p->is_visible ) {
+        # we only want to update the problem state if that makes sense. We never want to unhide a problem.
+        # If the update is older than the last update then we also do not want to update the state. This
+        # is largely to avoid the situation where we miss some updates, make more updates and then catch
+        # the updates when we fetch the last 24 hours of updates. The exception to this is the first
+        # comment. This is to catch automated updates which happen faster than we get the external_id
+        # back from the endpoint and hence have an created time before the lastupdate.
+        if ( $p->is_visible && $p->state ne $state &&
+            ( $comment->created >= $p->lastupdate || $p->comments->count == 0 ) ) {
             $p->state($state);
         }
     }
@@ -260,17 +262,22 @@ sub comment_text_for_request {
     my $ext_code_changed = $ext_code ne $old_ext_code;
     my $template;
     if ($state_changed || $ext_code_changed) {
+        my $order;
         my $state_params = {
             'me.state' => $state
         };
         if ($ext_code) {
             $state_params->{'me.external_status_code'} = $ext_code;
+            # make sure that empty string comes last. Can't use DESC as that orders
+            # empty string before codes starting with 0 and explicit ASC will order
+            # empty string before codes starting with characters
+            $order = { order_by => \"me.external_status_code DESC NULLS LAST" };
         };
 
         if (my $t = $problem->response_templates->search({
             auto_response => 1,
             -or => $state_params,
-        })->first) {
+        }, $order )->first) {
             $template = $t->text;
         }
     }

@@ -42,6 +42,8 @@ sub auto : Private {
     $c->forward('check_password_expiry');
     $c->detach('/auth/redirect') if $c->cobrand->call_hook('check_login_disallowed');
 
+    $c->forward('/offline/_stash_manifest_theme', [ $c->cobrand->moniker ]);
+
     return 1;
 }
 
@@ -158,11 +160,6 @@ sub check_login_required : Private {
         | ^[PACQM]/  # various tokens that log the user in
     }x;
     return if $c->request->path =~ $whitelist;
-
-    # Blacklisted URLs immediately 404
-    # This is primarily to work around a Safari bug where the appcache
-    # URL is requested in an infinite loop if it returns a 302 redirect.
-    $c->detach('/page_error_404_not_found', []) if $c->request->path =~ /^offline/;
 
     $c->detach( '/auth/redirect' );
 }

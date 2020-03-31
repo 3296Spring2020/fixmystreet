@@ -118,23 +118,40 @@ sub state_groups_inspect {
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
-    push @$extra, { name => 'external_id', value => $row->id };
-    push @$extra, { name => 'northing', value => $h->{northing} };
-    push @$extra, { name => 'easting', value => $h->{easting} };
-
-    if ($h->{closest_address}) {
-        push @$extra, { name => 'closest_address', value => "$h->{closest_address}" }
-    }
-    $row->set_extra_fields( @$extra );
-
     $params->{multi_photos} = 1;
     $params->{extended_description} = 'oxfordshire';
+}
+
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
+    return [
+        { name => 'external_id', value => $row->id },
+        { name => 'northing', value => $h->{northing} },
+        { name => 'easting', value => $h->{easting} },
+        $h->{closest_address} ? { name => 'closest_address', value => "$h->{closest_address}" } : (),
+    ];
 }
 
 sub open311_config_updates {
     my ($self, $params) = @_;
     $params->{use_customer_reference} = 1;
+}
+
+sub open311_pre_send {
+    my ($self, $row, $open311) = @_;
+
+    if ($row->get_extra_field_value('feature_id')) {
+        my $text = $row->detail;
+        $text .= "\n\nAsset Id: " . $row->get_extra_field_value('feature_id') . "\n";
+        $row->detail($text);
+    }
+
+    if ($row->get_extra_field_value('usrn')) {
+        my $text = $row->detail;
+        $text .= "\n\nUSRN: " . $row->get_extra_field_value('usrn') . "\n";
+        $row->detail($text);
+    }
 }
 
 sub should_skip_sending_update {

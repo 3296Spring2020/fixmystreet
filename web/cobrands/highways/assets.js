@@ -18,7 +18,6 @@ var defaults = {
     // this covers zoomed right out on Cumbrian sections of
     // the M6
     max_resolution: 20,
-    min_resolution: 0.5971642833948135,
     srsName: "EPSG:900913",
     strategy_class: OpenLayers.Strategy.FixMyStreet
 };
@@ -35,6 +34,20 @@ fixmystreet.assets.add(defaults, {
     non_interactive: true,
     road: true,
     all_categories: true,
+    usrn: [
+        {
+            field: 'road_name',
+            attribute: 'ROA_NUMBER'
+        },
+        {
+            field: 'area_name',
+            attribute: 'area_name'
+        },
+        {
+            field: 'sect_label',
+            attribute: 'sect_label'
+        }
+    ],
     // motorways are wide and the lines to define them are narrow so we
     // need a bit more margin for error in finding the nearest to stop
     // clicking in the middle of them being undetected
@@ -52,7 +65,6 @@ fixmystreet.assets.add(defaults, {
             }
             $('#highways').remove();
             if ( !fixmystreet.assets.selectedFeature() ) {
-                fixmystreet.body_overrides.only_send('Highways England');
                 add_highways_warning(feature.attributes.ROA_NUMBER);
                 $('#category_meta').empty();
             }
@@ -61,11 +73,53 @@ fixmystreet.assets.add(defaults, {
             fixmystreet.body_overrides.location = null;
             if (fixmystreet.body_overrides.get_only_send() === 'Highways England') {
                 fixmystreet.body_overrides.remove_only_send();
+                fixmystreet.body_overrides.do_not_send('Highways England');
             }
             $('#highways').remove();
         }
     }
 });
+
+function regenerate_category(he_flag) {
+    if (!fixmystreet.reporting_data) return;
+
+    // Restart the category dropdown from the original data (not all of it as
+    // we keep subcategories the same)
+    var select = $(fixmystreet.reporting_data.category).filter('select');
+    if (he_flag) {
+        var select1 = select.find('> option:first-child')[0].outerHTML;
+        var select2 = select.find('optgroup[label*="Highways England"]').html();
+        $('#form_category').html(select1 + select2);
+    } else {
+        select.find('optgroup[label*="Highways England"]').remove();
+        select = select.html();
+        $('#form_category').html(select);
+    }
+
+    // Recalculate the category groups
+    var old_category_group = $('#category_group').val() || $('#filter_group').val();
+    $('#category_group').remove();
+    fixmystreet.set_up.category_groups(old_category_group, true);
+}
+
+function he_selected() {
+    fixmystreet.body_overrides.location = null;
+    fixmystreet.body_overrides.only_send('Highways England');
+    fixmystreet.body_overrides.allow_send('Highways England');
+    regenerate_category(true);
+    $(fixmystreet).trigger('report_new:highways_change');
+}
+
+function non_he_selected() {
+    fixmystreet.body_overrides.location = {
+        latitude: $('#fixmystreet\\.latitude').val(),
+        longitude: $('#fixmystreet\\.longitude').val()
+    };
+    fixmystreet.body_overrides.remove_only_send();
+    fixmystreet.body_overrides.do_not_send('Highways England');
+    $(fixmystreet).trigger('report_new:highways_change');
+    regenerate_category(false);
+}
 
 function add_highways_warning(road_name) {
   var $warning = $('<div class="box-warning" id="highways"><p>It looks like you clicked on the <strong>' + road_name + '</strong> which is managed by <strong>Highways England</strong>. ' +
@@ -77,12 +131,7 @@ function add_highways_warning(road_name) {
         .attr('name', 'highways-choice')
         .attr('id', 'js-highways')
         .prop('checked', true)
-        .on('click', function() {
-            fixmystreet.body_overrides.location = null;
-            fixmystreet.body_overrides.only_send('Highways England');
-            $(fixmystreet).trigger('report_new:highways_change');
-            $('#category_meta').empty();
-        })
+        .on('click', he_selected)
         .appendTo($radios);
     $('<label>')
         .attr('for', 'js-highways')
@@ -93,14 +142,7 @@ function add_highways_warning(road_name) {
         .attr('type', 'radio')
         .attr('name', 'highways-choice')
         .attr('id', 'js-not-highways')
-        .on('click', function() {
-            fixmystreet.body_overrides.location = {
-                latitude: $('#fixmystreet\\.latitude').val(),
-                longitude: $('#fixmystreet\\.longitude').val()
-            };
-            fixmystreet.body_overrides.remove_only_send();
-            $(fixmystreet).trigger('report_new:highways_change');
-        })
+        .on('click', non_he_selected)
         .appendTo($radios);
     $('<label>')
         .attr('for', 'js-not-highways')
@@ -109,9 +151,7 @@ function add_highways_warning(road_name) {
         .appendTo($radios);
     $radios.appendTo($warning);
     $('.change_location').after($warning);
-    fixmystreet.body_overrides.location = null;
-    fixmystreet.body_overrides.only_send('Highways England');
-    $(fixmystreet).trigger('report_new:highways_change');
+    he_selected();
 }
 
 })();

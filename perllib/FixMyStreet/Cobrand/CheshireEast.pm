@@ -60,15 +60,19 @@ sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
     $params->{multi_photos} = 1;
+}
 
-    my $extra = $row->get_extra_fields;
-    push @$extra,
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
+    my $open311_only = [
         { name => 'report_url',
           value => $h->{url} },
         { name => 'title',
           value => $row->title },
         { name => 'description',
-          value => $row->detail };
+          value => $row->detail },
+    ];
 
     # Reports made via FMS.com or the app probably won't have a site code
     # value because we don't display the adopted highways layer on those
@@ -82,7 +86,7 @@ sub open311_config {
         }
     }
 
-    $row->set_extra_fields(@$extra);
+    return $open311_only;
 }
 
 # TODO These values may not be accurate
@@ -124,14 +128,14 @@ sub council_rss_alert_options {
         type      => 'council',
         id        => sprintf( 'council:%s:%s', $council->{id}, $council->{id_name} ),
         text      => 'All reported problems within the council',
-        rss_text  => sprintf( _('RSS feed of problems within %s'), $council->{name}),
+        rss_text  => sprintf( 'RSS feed of problems within %s', $council->{name}),
         uri       => $c->uri_for( '/rss/reports/' . $council->{short_name} ),
     };
     push @options, {
         type     => 'ward',
         id       => sprintf( 'ward:%s:%s:%s:%s', $council->{id}, $ward->{id}, $council->{id_name}, $ward->{id_name} ),
-        rss_text => sprintf( _('RSS feed of reported problems within %s ward'), $ward->{name}),
-        text     => sprintf( _('Reported problems within %s ward'), $ward->{name}),
+        rss_text => sprintf( 'RSS feed of reported problems within %s ward', $ward->{name}),
+        text     => sprintf( 'Reported problems within %s ward', $ward->{name}),
         uri      => $c->uri_for( '/rss/reports/' . $council->{short_name} . '/' . $ward->{short_name} ),
     } if $ward;
 

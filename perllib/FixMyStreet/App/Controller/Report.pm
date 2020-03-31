@@ -160,7 +160,16 @@ sub load_problem_or_display_error : Private {
         $c->stash->{problem} = $problem;
         my $permissions = $c->stash->{_permissions} = $c->forward( 'check_has_permission_to',
             [ qw/report_inspect report_edit_category report_edit_priority report_mark_private / ] );
-        if ( !$c->user || ($c->user->id != $problem->user->id && !($permissions->{report_inspect} || $permissions->{report_mark_private})) ) {
+
+        # If someone has clicked a unique token link in an email to them
+        my $from_email = $c->sessionid && $c->flash->{alert_to_reporter} && $c->flash->{alert_to_reporter} == $problem->id;
+
+        my $allowed = 0;
+        $allowed = 1 if $from_email;
+        $allowed = 1 if $c->user_exists && $c->user->id == $problem->user->id;
+        $allowed = 1 if $permissions->{report_inspect} || $permissions->{report_mark_private};
+
+        unless  ($allowed) {
             my $url = '/auth?r=report/' . $problem->id;
             $c->detach(
                 '/page_error_403_access_denied',
@@ -299,7 +308,8 @@ sub format_problem_for_display : Private {
         delete $report_hashref->{created};
         delete $report_hashref->{confirmed};
 
-        my $content = encode_json(
+        my $json = JSON::MaybeXS->new( convert_blessed => 1, utf8 => 1 );
+        my $content = $json->encode(
             {
                 report => $report_hashref,
                 updates => $c->cobrand->updates_as_hashref( $problem, $c ),
@@ -590,7 +600,13 @@ sub inspect : Private {
 sub map :Chained('id') :Args(0) {
     my ($self, $c) = @_;
 
-    my $image = $c->stash->{problem}->static_map;
+    my %params;
+    if ( $c->get_param('inline_duplicate') ) {
+        $params{full_size} = 1;
+        $params{zoom} = 5;
+    }
+
+    my $image = $c->stash->{problem}->static_map(%params);
     $c->res->content_type($image->{content_type});
     $c->res->body($image->{data});
 }
@@ -639,7 +655,7 @@ sub _nearby_json :Private {
 
     my $list_html = $c->render_fragment(
         'report/nearby.html',
-        { reports => $nearby }
+        { reports => $nearby, inline_maps => $c->get_param("inline_maps") ? 1 : 0 }
     );
 
     my $json = { pins => \@pins };
