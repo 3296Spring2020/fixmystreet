@@ -3,9 +3,10 @@
    title = loc('General Enquiry')
 %]
 
+<p>This is the first test <br>
+</p>
 
 <form method="post" action="/contact/enquiry/submit" class="validate" enctype="multipart/form-data">
-
     <input type="hidden" name="token" value="[% csrf_token %]">
     <input type="hidden" name="submit_problem" value="1">
     <fieldset>
@@ -23,11 +24,6 @@
         [% END %]
         <input type="text" class="form-control required email" name="username" id="form_email" [% "disabled" IF c.user.email %] value="[% ( email OR c.user.email ) | html %]" size="30">
 
-        <div class="form-group">
-          <label for="form_phone">[% loc('Your phone number') %]</label>
-          <span class="required-text required-text--optional">[% loc('optional') %]</span>
-          <input type="text" class="form-control extra.phone" name="extra.phone" id="form_phone" value="[% report.user.phone | html %]" size="30">
-        </div>
 
         <label for="form_category">[% loc('Subject') %]</label>
         [% IF field_errors.category %]

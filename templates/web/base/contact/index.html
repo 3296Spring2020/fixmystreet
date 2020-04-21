@@ -20,6 +20,9 @@
 [% END %]
 
 <form method="post" action="/contact/submit" class="validate">
+
+<p>Include this POR FAVOR</p>
+
     <input type="hidden" name="token" value="[% csrf_token %]">
     <input type="hidden" name="s" value="[% s %]">
     <fieldset>
@@ -93,12 +96,6 @@
            <div class="form-error">[% field_errors.em %]</div>
         [% END %]
         <input type="text" class="form-control required email" name="em" id="form_email" value="[% em | html %]" size="30">
-
-        <div class="form-group">
-          <label for="form_phone">[% loc('Your phone number') %]</label>
-          <span class="required-text required-text--optional">[% loc('optional') %]</span>
-          <input type="text" class="form-control extra.phone" name="extra.phone" id="form_phone" value="" size="30">
-        </div>
 
         <label for="form_subject">[% loc('Subject') %]</label>
         [% IF field_errors.subject %]
