@@ -21,7 +21,6 @@
 
 <form method="post" action="/contact/submit" class="validate">
 
-<p>Include this POR FAVOR</p>
 
     <input type="hidden" name="token" value="[% csrf_token %]">
     <input type="hidden" name="s" value="[% s %]">
@@ -123,6 +122,14 @@
     [% INCLUDE 'contact/_footer.html' %]
 [% CATCH file %]
     <h4>[% loc("Don't like forms?") %]</h4>
+
+	<p>You can contact the FixMyStreetPhilly team directly for any concerns. Feel 
+	free to donate or reach out to us at the following emails:
+	<br><br>Mahmood Ahmed: tuh42087@temple.edu
+	<br>Alex Liu: tuk60559@temple.edu
+	<br>Stephen Lucas: tuf59191@temple.edu
+	<br>Marcus Heimann: tuj52064@temple.edu
+	</p>
 
     <p>
     [% tprintf( loc("You can contact technical support on <a href='mailto:%s'>%s</a>"), contact_email, contact_email) %]
