@@ -96,11 +96,6 @@
         [% END %]
         <input type="text" class="form-control required email" name="em" id="form_email" value="[% em | html %]" size="30">
 
-        <label for="form_subject">[% loc('Subject') %]</label>
-        [% IF field_errors.subject %]
-           <div class="form-error">[% field_errors.subject %]</div>
-        [% END %]
-        <input type="text" class="form-control required" name="subject" id="form_subject" value="[% subject | html %]" size="30">
 
         <label for="form_message">[% loc('Message') %]</label>
         [% IF field_errors.message %]
